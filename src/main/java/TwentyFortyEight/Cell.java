@@ -9,20 +9,10 @@ public class Cell {
     private int value;
     private HashMap<Integer, PImage> numberToImage;
 
-    // Animation properties
-    private int sourceX;
-    private int sourceY;
-    private int targetX;
-    private int targetY;
-
     public Cell(int x, int y) {
         this.x = x;
         this.y = y;
         this.value = 0;
-        this.sourceX = x;
-        this.sourceY = y;
-        this.targetX = x;
-        this.targetY = y;
         this.numberToImage = new HashMap<>();
         
         // Initialize number to image mappings
@@ -62,47 +52,14 @@ public class Cell {
         return this.y;
     }
 
-    // Animation getters and setters
-    public int getSourceX() {
-        return this.sourceX;
-    }
-
-    public void setSourceX(int sourceX) {
-        this.sourceX = sourceX;
-    }
-
-    public int getSourceY() {
-        return this.sourceY;
-    }
-
-    public void setSourceY(int sourceY) {
-        this.sourceY = sourceY;
-    }
-
-    public int getTargetX() {
-        return this.targetX;
-    }
-
-    public void setTargetX(int targetX) {
-        this.targetX = targetX;
-    }
-
-    public int getTargetY() {
-        return this.targetY;
-    }
-
-    public void setTargetY(int targetY) {
-        this.targetY = targetY;
-    }
-
     /*
      * This draws the cell
      */
     public void draw(App app) {
-        float px = x * App.CELLSIZE;
-        float py = y * App.CELLSIZE;
+        float px = x * (App.CELLSIZE + App.CELL_BUFFER) + App.CELL_BUFFER;
+        float py = y * (App.CELLSIZE + App.CELL_BUFFER) + App.CELL_BUFFER + App.offsetY;
 
-        app.stroke(156, 139, 124);
+        app.noStroke();
 
         if (app.mouseX > px && app.mouseX < px + App.CELLSIZE &&
             app.mouseY > py && app.mouseY < py + App.CELLSIZE) {
@@ -111,33 +68,10 @@ public class Cell {
             app.fill(189, 172, 151);
         }
 
-        app.rect(px, py, App.CELLSIZE, App.CELLSIZE);
+        app.rect(px, py, App.CELLSIZE, App.CELLSIZE, 20);
 
         if (this.value != 0) {
-            app.image(numberToImage.get(this.value), px + 8, py + 8, App.CELLSIZE - 10, App.CELLSIZE - 10);
-        }
-    }
-
-    /*
-     * Draws the cell at the interpolated position during animation
-     */
-    public void drawAnimated(App app, float currentX, float currentY) {
-        float px = currentX * App.CELLSIZE;
-        float py = currentY * App.CELLSIZE;
-
-        app.stroke(156, 139, 124);
-    
-        if (app.mouseX > px && app.mouseX < px + App.CELLSIZE &&
-            app.mouseY > py && app.mouseY < py + App.CELLSIZE) {
-            app.fill(232, 207, 184);  // Hover color
-        } else {
-            app.fill(189, 172, 151);  // Default cell color
-        }
-
-        app.rect(px, py, App.CELLSIZE, App.CELLSIZE);
-
-        if (this.value != 0) {
-            app.image(numberToImage.get(this.value), px + 8, py + 8, App.CELLSIZE - 10, App.CELLSIZE - 10);
+            app.image(numberToImage.get(this.value), px, py, App.CELLSIZE, App.CELLSIZE);
         }
     }
 }

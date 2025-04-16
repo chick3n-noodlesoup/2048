@@ -1,20 +1,13 @@
 package TwentyFortyEight;
+import TwentyFortyEight.AnimatedTile;
 
-import org.checkerframework.checker.units.qual.A;
 import processing.core.PApplet;
 import processing.core.PImage;
 import processing.core.PConstants;
 import processing.core.PFont;
-import processing.data.JSONArray;
-import processing.data.JSONObject;
 import processing.event.KeyEvent;
 import processing.event.MouseEvent;
 
-//import java.awt.*;
-import java.awt.geom.AffineTransform;
-import java.awt.image.BufferedImage;
-
-import java.io.*;
 import java.util.*;
 
 public class App extends PApplet {
@@ -22,9 +15,10 @@ public class App extends PApplet {
     public static int GRID_SIZE = 4; // 4x4 grid
     public static final int CELLSIZE = 100; // Cell size in pixels
     public static final int CELL_BUFFER = 8; // Space between cells
+    public static final int offsetY = 40;
     public static int WIDTH = GRID_SIZE * CELLSIZE;
     public static int HEIGHT = GRID_SIZE * CELLSIZE;
-    public static final int FPS = 30;
+    public static final int FPS = 60;
 
     // Color constants
     public final int BACKGROUND_COLOR = color(155, 138, 122);  // Standard 2048 background
@@ -32,12 +26,12 @@ public class App extends PApplet {
     public final int GRID_BORDER_COLOR = color(155, 138, 122); // Grid border color
         
     // Animation constants
-    public static final int ANIMATION_FRAMES = 8; // Animation duration in frames (0.5 seconds at 30fps)
+    public static final int ANIMATION_FRAMES = 10; // Animation duration in frames
     private int currentAnimationFrame = 0;
     private boolean isAnimating = false;
 
     private Cell[][] board;
-    private Cell[][] previousBoard; // Store previous state for animation
+    private ArrayList<AnimatedTile> animatedTiles; // Store tiles being animated
 
     public static Random random = new Random();
 
@@ -60,13 +54,12 @@ public class App extends PApplet {
     public static PImage twoThousandFortyEight;
     public static PImage fourThousandNinetySix;
 
-    // Feel free to add any additional methods or attributes you want. Please put
-    // classes in different files.
+    // Last direction of movement
+    private int lastMoveDirection = PConstants.RIGHT; // Default direction
 
     public App() {
-        //this.configPath = "config.json";
         this.board = new Cell[GRID_SIZE][GRID_SIZE];
-        this.previousBoard = new Cell[GRID_SIZE][GRID_SIZE];
+        this.animatedTiles = new ArrayList<>();
     }
 
     /**
@@ -85,8 +78,7 @@ public class App extends PApplet {
     public void setup() {
         frameRate(FPS);
 
-        // See PApplet javadoc:
-        // loadJSONObject(configPath)
+        // Load images
         this.two = loadImage(this.getClass().getResource("2.png").getPath().replace("%20", ""));
         this.four = loadImage(this.getClass().getResource("4.png").getPath().replace("%20", ""));
         this.eight = loadImage(this.getClass().getResource("8.png").getPath().replace("%20", ""));
@@ -99,13 +91,11 @@ public class App extends PApplet {
         this.oneThousandTwentyFour = loadImage(this.getClass().getResource("1024.png").getPath().replace("%20", ""));
         this.twoThousandFortyEight = loadImage(this.getClass().getResource("2048.png").getPath().replace("%20", ""));
         this.fourThousandNinetySix = loadImage(this.getClass().getResource("4096.png").getPath().replace("%20", ""));
-        // " "));
 
-        // create attributes for data storage, eg board
+        // Initialize the board
         for (int i = 0; i < board.length; i++) {
-            for (int i2 = 0; i2 < board[i].length; i2++) {
-                board[i][i2] = new Cell(i2, i);
-                previousBoard[i][i2] = new Cell(i2, i);
+            for (int j = 0; j < board[i].length; j++) {
+                board[i][j] = new Cell(j, i);
             }
         }
 
@@ -113,23 +103,9 @@ public class App extends PApplet {
         gameOver = false;
         gameStarted = true;
 
+        // Add initial tiles
         addRandomTile();
         addRandomTile();
-        saveCurrentBoardState();
-    }
-    
-    // Helper method to save the current board state for animation
-    private void saveCurrentBoardState() {
-        for (int i = 0; i < GRID_SIZE; i++) {
-            for (int j = 0; j < GRID_SIZE; j++) {
-                previousBoard[i][j] = new Cell(j, i);
-                previousBoard[i][j].setValue(board[i][j].getValue());
-                previousBoard[i][j].setSourceX(board[i][j].getX());
-                previousBoard[i][j].setSourceY(board[i][j].getY());
-                previousBoard[i][j].setTargetX(board[i][j].getX());
-                previousBoard[i][j].setTargetY(board[i][j].getY());
-            }
-        }
     }
     
     // Helper method to copy the board state
@@ -155,7 +131,6 @@ public class App extends PApplet {
         return true;
     }
 
-
     @Override
     public void keyReleased(KeyEvent e) {
         // Not used in this case
@@ -164,8 +139,14 @@ public class App extends PApplet {
     @Override
     public void mousePressed(MouseEvent e) {
         if (e.getButton() == PConstants.LEFT && !isAnimating) {
-            Cell current = board[e.getY()/App.CELLSIZE][e.getX()/App.CELLSIZE];
-            current.place();
+            int y = e.getY()/App.CELLSIZE;
+            int x = e.getX()/App.CELLSIZE;
+            
+            // Check bounds to prevent array index out of bounds
+            if (y >= 0 && y < GRID_SIZE && x >= 0 && x < GRID_SIZE) {
+                Cell current = board[y][x];
+                current.place();
+            }
         }
     }
 
@@ -174,235 +155,246 @@ public class App extends PApplet {
         // Not used in this case
     }
 
-    private void moveLeft() {
+    private void prepareAnimation() {
+        // Clear previous animations
+        animatedTiles.clear();
+        
+        // Create animated tiles for all non-zero cells
         for (int y = 0; y < GRID_SIZE; y++) {
-            mergeRow(board[y]);
+            for (int x = 0; x < GRID_SIZE; x++) {
+                if (board[y][x].getValue() > 0) {
+                    // Add to animation list
+                    AnimatedTile tile = new AnimatedTile(
+                        board[y][x].getValue(),
+                        x, y,  // Current position (will be the target)
+                        x, y   // Start with same source as target (we'll update this)
+                    );
+                    animatedTiles.add(tile);
+                }
+            }
+        }
+    }
+
+    private void moveLeft() {
+        // Prepare for animation tracking
+        prepareAnimation();
+        
+        boolean[][] merged = new boolean[GRID_SIZE][GRID_SIZE]; // Track merged tiles
+        
+        // Process each row
+        for (int y = 0; y < GRID_SIZE; y++) {
+            for (int x = 1; x < GRID_SIZE; x++) {
+                if (board[y][x].getValue() == 0) continue;
+                
+                int origX = x;
+                int origY = y;
+                int newX = x;
+                
+                // Try to move this tile as far left as possible
+                while (newX > 0 && board[y][newX-1].getValue() == 0) {
+                    newX--;
+                }
+                
+                // Check if we can merge with the tile to our left
+                if (newX > 0 && board[y][newX-1].getValue() == board[y][x].getValue() && !merged[y][newX-1]) {
+                    // Merge with the tile to the left
+                    board[y][newX-1].setValue(board[y][newX-1].getValue() * 2);
+                    board[y][x].setValue(0);
+                    merged[y][newX-1] = true;
+                    
+                    // Update animation data
+                    for (AnimatedTile tile : animatedTiles) {
+                        if (tile.getSourceX() == origX && tile.getSourceY() == origY) {
+                            tile.setTargetX(newX-1);
+                            tile.setTargetY(y);
+                            tile.setMerged(true);
+                        }
+                    }
+                } else if (newX != x) {
+                    // Just move without merging
+                    board[y][newX].setValue(board[y][x].getValue());
+                    board[y][x].setValue(0);
+                    
+                    // Update animation data
+                    for (AnimatedTile tile : animatedTiles) {
+                        if (tile.getSourceX() == origX && tile.getSourceY() == origY) {
+                            tile.setTargetX(newX);
+                            tile.setTargetY(y);
+                        }
+                    }
+                }
+            }
         }
     }
 
     private void moveRight() {
+        // Prepare for animation tracking
+        prepareAnimation();
+        
+        boolean[][] merged = new boolean[GRID_SIZE][GRID_SIZE]; // Track merged tiles
+        
+        // Process each row from right to left
         for (int y = 0; y < GRID_SIZE; y++) {
-            reverseRow(board[y]);
-            mergeRow(board[y]);
-            reverseRow(board[y]);
+            for (int x = GRID_SIZE - 2; x >= 0; x--) {
+                if (board[y][x].getValue() == 0) continue;
+                
+                int origX = x;
+                int origY = y;
+                int newX = x;
+                
+                // Try to move this tile as far right as possible
+                while (newX < GRID_SIZE - 1 && board[y][newX+1].getValue() == 0) {
+                    newX++;
+                }
+                
+                // Check if we can merge with the tile to our right
+                if (newX < GRID_SIZE - 1 && board[y][newX+1].getValue() == board[y][x].getValue() && !merged[y][newX+1]) {
+                    // Merge with the tile to the right
+                    board[y][newX+1].setValue(board[y][newX+1].getValue() * 2);
+                    board[y][x].setValue(0);
+                    merged[y][newX+1] = true;
+                    
+                    // Update animation data
+                    for (AnimatedTile tile : animatedTiles) {
+                        if (tile.getSourceX() == origX && tile.getSourceY() == origY) {
+                            tile.setTargetX(newX+1);
+                            tile.setTargetY(y);
+                            tile.setMerged(true);
+                        }
+                    }
+                } else if (newX != x) {
+                    // Just move without merging
+                    board[y][newX].setValue(board[y][x].getValue());
+                    board[y][x].setValue(0);
+                    
+                    // Update animation data
+                    for (AnimatedTile tile : animatedTiles) {
+                        if (tile.getSourceX() == origX && tile.getSourceY() == origY) {
+                            tile.setTargetX(newX);
+                            tile.setTargetY(y);
+                        }
+                    }
+                }
+            }
         }
     }
 
     private void moveUp() {
+        // Prepare for animation tracking
+        prepareAnimation();
+        
+        boolean[][] merged = new boolean[GRID_SIZE][GRID_SIZE]; // Track merged tiles
+        
+        // Process each column from top to bottom
         for (int x = 0; x < GRID_SIZE; x++) {
-            mergeColumn(x);
+            for (int y = 1; y < GRID_SIZE; y++) {
+                if (board[y][x].getValue() == 0) continue;
+                
+                int origX = x;
+                int origY = y;
+                int newY = y;
+                
+                // Try to move this tile as far up as possible
+                while (newY > 0 && board[newY-1][x].getValue() == 0) {
+                    newY--;
+                }
+                
+                // Check if we can merge with the tile above
+                if (newY > 0 && board[newY-1][x].getValue() == board[y][x].getValue() && !merged[newY-1][x]) {
+                    // Merge with the tile above
+                    board[newY-1][x].setValue(board[newY-1][x].getValue() * 2);
+                    board[y][x].setValue(0);
+                    merged[newY-1][x] = true;
+                    
+                    // Update animation data
+                    for (AnimatedTile tile : animatedTiles) {
+                        if (tile.getSourceX() == origX && tile.getSourceY() == origY) {
+                            tile.setTargetX(x);
+                            tile.setTargetY(newY-1);
+                            tile.setMerged(true);
+                        }
+                    }
+                } else if (newY != y) {
+                    // Just move without merging
+                    board[newY][x].setValue(board[y][x].getValue());
+                    board[y][x].setValue(0);
+                    
+                    // Update animation data
+                    for (AnimatedTile tile : animatedTiles) {
+                        if (tile.getSourceX() == origX && tile.getSourceY() == origY) {
+                            tile.setTargetX(x);
+                            tile.setTargetY(newY);
+                        }
+                    }
+                }
+            }
         }
     }
 
     private void moveDown() {
+        // Prepare for animation tracking
+        prepareAnimation();
+        
+        boolean[][] merged = new boolean[GRID_SIZE][GRID_SIZE]; // Track merged tiles
+        
+        // Process each column from bottom to top
         for (int x = 0; x < GRID_SIZE; x++) {
-            reverseColumn(x);
-            mergeColumn(x);
-            reverseColumn(x);
-        }
-    }
-
-    private void reverseRow(Cell[] row) {
-        for (int i = 0; i < GRID_SIZE / 2; i++) {
-            Cell temp = row[i];
-            row[i] = row[GRID_SIZE - i - 1];
-            row[GRID_SIZE - i - 1] = temp;
-        }
-    }
-
-    private void mergeRow(Cell[] row) {
-        // Step 1: Compact non-zero values to the left
-        int[] values = new int[GRID_SIZE];
-        int writeIndex = 0;
-        
-        for (int i = 0; i < GRID_SIZE; i++) {
-            if (row[i].getValue() != 0) {
-                values[writeIndex++] = row[i].getValue();
-            }
-        }
-        
-        // Step 2: Merge adjacent identical values (only one merge per number)
-        int[] merged = new int[GRID_SIZE];
-        int mergeIndex = 0;
-        
-        for (int i = 0; i < writeIndex; i++) {
-            // If current value and next value are the same, merge them
-            if (i + 1 < writeIndex && values[i] == values[i + 1]) {
-                merged[mergeIndex++] = values[i] * 2;
-                i++; // Skip the next value as it's been merged
-            } else {
-                // Otherwise, just copy the value
-                merged[mergeIndex++] = values[i];
-            }
-        }
-        
-        // Step 3: Update the row with new values
-        for (int i = 0; i < GRID_SIZE; i++) {
-            if (i < mergeIndex) {
-                row[i].setValue(merged[i]);
-            } else {
-                row[i].setValue(0);
-            }
-        }
-    }
-
-    private void mergeColumn(int col) {
-        // Step 1: Compact non-zero values to the top
-        int[] values = new int[GRID_SIZE];
-        int writeIndex = 0;
-        
-        for (int i = 0; i < GRID_SIZE; i++) {
-            if (board[i][col].getValue() != 0) {
-                values[writeIndex++] = board[i][col].getValue();
-            }
-        }
-        
-        // Step 2: Merge adjacent identical values (only one merge per number)
-        int[] merged = new int[GRID_SIZE];
-        int mergeIndex = 0;
-        
-        for (int i = 0; i < writeIndex; i++) {
-            // If current value and next value are the same, merge them
-            if (i + 1 < writeIndex && values[i] == values[i + 1]) {
-                merged[mergeIndex++] = values[i] * 2;
-                i++; // Skip the next value as it's been merged
-            } else {
-                // Otherwise, just copy the value
-                merged[mergeIndex++] = values[i];
-            }
-        }
-        
-        // Step 3: Update the column with new values
-        for (int i = 0; i < GRID_SIZE; i++) {
-            if (i < mergeIndex) {
-                board[i][col].setValue(merged[i]);
-            } else {
-                board[i][col].setValue(0);
-            }
-        }
-    }
-
-    private void reverseColumn(int col) {
-        for (int i = 0; i < GRID_SIZE / 2; i++) {
-            Cell temp = board[i][col];
-            board[i][col] = board[GRID_SIZE - i - 1][col];
-            board[GRID_SIZE - i - 1][col] = temp;
-        }
-    }
-
-    /**
-     * Draw all elements in the game by current frame.
-     */
-    // Modified drawAnimatedBoard method to keep the background color consistent
-    
-
-    // Add this easing function for smoother animations
-    private float easeCubic(float t) {
-        return t < 0.5 ? 4 * t * t * t : 1 - (float)Math.pow(-2 * t + 2, 3) / 2;
-    }
-
-    // Modify the updateCellTargets method to handle merges better
-    private void updateCellTargets() {
-        // First identify merges that happened
-        Map<String, List<Cell>> mergedCells = new HashMap<>();
-        
-        // Process the board to identify merges
-        for (int i = 0; i < GRID_SIZE; i++) {
-            for (int j = 0; j < GRID_SIZE; j++) {
-                int value = board[i][j].getValue();
-                if (value != 0) {
-                    String key = i + "," + j;
-                    mergedCells.put(key, new ArrayList<>());
+            for (int y = GRID_SIZE - 2; y >= 0; y--) {
+                if (board[y][x].getValue() == 0) continue;
+                
+                int origX = x;
+                int origY = y;
+                int newY = y;
+                
+                // Try to move this tile as far down as possible
+                while (newY < GRID_SIZE - 1 && board[newY+1][x].getValue() == 0) {
+                    newY++;
                 }
-            }
-        }
-        
-        // For each cell in previous board, find its target position
-        for (int i = 0; i < GRID_SIZE; i++) {
-            for (int j = 0; j < GRID_SIZE; j++) {
-                Cell cell = previousBoard[i][j];
-                if (cell.getValue() != 0) {
-                    // Find the best matching position in the new board
-                    int bestTargetY = -1;
-                    int bestTargetX = -1;
-                    int minDistance = Integer.MAX_VALUE;
+                
+                // Check if we can merge with the tile below
+                if (newY < GRID_SIZE - 1 && board[newY+1][x].getValue() == board[y][x].getValue() && !merged[newY+1][x]) {
+                    // Merge with the tile below
+                    board[newY+1][x].setValue(board[newY+1][x].getValue() * 2);
+                    board[y][x].setValue(0);
+                    merged[newY+1][x] = true;
                     
-                    // Direction of movement based on last key press
-                    boolean horizontal = (lastMoveDirection == PConstants.LEFT || lastMoveDirection == PConstants.RIGHT);
-                    boolean increasing = (lastMoveDirection == PConstants.RIGHT || lastMoveDirection == PConstants.DOWN);
-                    
-                    for (int y = 0; y < GRID_SIZE; y++) {
-                        for (int x = 0; x < GRID_SIZE; x++) {
-                            if (board[y][x].getValue() == cell.getValue() || 
-                                board[y][x].getValue() == cell.getValue() * 2) {
-                                
-                                // Calculate distance based on movement direction
-                                int distance;
-                                
-                                if (horizontal) {
-                                    // When moving horizontally, Y must match
-                                    if (y != i) continue;
-                                    
-                                    // X distance considering direction
-                                    if (increasing) {
-                                        distance = x >= j ? x - j : GRID_SIZE + x - j;
-                                    } else {
-                                        distance = x <= j ? j - x : j + GRID_SIZE - x;
-                                    }
-                                } else {
-                                    // When moving vertically, X must match
-                                    if (x != j) continue;
-                                    
-                                    // Y distance considering direction
-                                    if (increasing) {
-                                        distance = y >= i ? y - i : GRID_SIZE + y - i;
-                                    } else {
-                                        distance = y <= i ? i - y : i + GRID_SIZE - y;
-                                    }
-                                }
-                                
-                                String key = y + "," + x;
-                                if (distance < minDistance && mergedCells.containsKey(key) && 
-                                    mergedCells.get(key).size() < (board[y][x].getValue() == cell.getValue() * 2 ? 2 : 1)) {
-                                    minDistance = distance;
-                                    bestTargetY = y;
-                                    bestTargetX = x;
-                                }
-                            }
+                    // Update animation data
+                    for (AnimatedTile tile : animatedTiles) {
+                        if (tile.getSourceX() == origX && tile.getSourceY() == origY) {
+                            tile.setTargetX(x);
+                            tile.setTargetY(newY+1);
+                            tile.setMerged(true);
                         }
                     }
+                } else if (newY != y) {
+                    // Just move without merging
+                    board[newY][x].setValue(board[y][x].getValue());
+                    board[y][x].setValue(0);
                     
-                    if (bestTargetY != -1 && bestTargetX != -1) {
-                        cell.setTargetY(bestTargetY);
-                        cell.setTargetX(bestTargetX);
-                        
-                        String key = bestTargetY + "," + bestTargetX;
-                        mergedCells.get(key).add(cell);
-                    } else {
-                        // Cell disappeared (merged with another)
-                        cell.setValue(0);
+                    // Update animation data
+                    for (AnimatedTile tile : animatedTiles) {
+                        if (tile.getSourceX() == origX && tile.getSourceY() == origY) {
+                            tile.setTargetX(x);
+                            tile.setTargetY(newY);
+                        }
                     }
                 }
             }
         }
     }
 
-    // Add this field to track the last direction of movement
-    private int lastMoveDirection = PConstants.RIGHT; // Default direction
-
-    // Update the keyPressed method to set the last direction
     @Override
     public void keyPressed(KeyEvent event) {
         // If animation is in progress, ignore input
-        if (isAnimating) {
+        if (isAnimating || gameOver) {
+            if (gameOver && (event.getKey() == 'r' || event.getKey() == 'R')) {
+                restartGame();
+            }
             return;
         }
 
         int[][] originalBoard = boardToArray(board);
         
-        // Save the current state for animation
-        saveCurrentBoardState();
-
         if (event.getKeyCode() == PConstants.LEFT) {
             lastMoveDirection = PConstants.LEFT;
             moveLeft();
@@ -416,28 +408,20 @@ public class App extends PApplet {
             lastMoveDirection = PConstants.DOWN;
             moveDown();
         } else if (event.getKey() == 'r' || event.getKey() == 'R') {
-            if (gameOver) {
-                restartGame();
-            }
+            restartGame();
+            return;
         }
 
+        // Check if the board changed and start animation if it did
         if (!boardsAreEqual(originalBoard, boardToArray(board))) {
-            // Start animation
             isAnimating = true;
             currentAnimationFrame = 0;
-            
-            // Update target positions for animation
-            updateCellTargets();
-            
-            // Will add a new tile after animation completes
             waitingForNewTile = true;
         }
         
         checkGameOver();
     }
 
-    // Update the draw method to keep the background color consistent
-    // Modified drawAnimatedBoard method to use the correct grid colors
     private void drawAnimatedBoard() {
         // Draw the background first
         background(BACKGROUND_COLOR);
@@ -447,52 +431,44 @@ public class App extends PApplet {
             for (int j = 0; j < GRID_SIZE; j++) {
                 // Draw empty cell background
                 fill(GRID_COLOR);
-                stroke(GRID_BORDER_COLOR);
-                rect(j * CELLSIZE, i * CELLSIZE, CELLSIZE, CELLSIZE);
+                noStroke();
+                rect(j * (CELLSIZE + CELL_BUFFER) + CELL_BUFFER, 
+                     i * (CELLSIZE + CELL_BUFFER) + CELL_BUFFER + offsetY, 
+                     CELLSIZE, CELLSIZE, 20);
             }
         }
         
-        // Draw animated tiles from previous state
-        for (int i = 0; i < GRID_SIZE; i++) {
-            for (int j = 0; j < GRID_SIZE; j++) {
-                Cell cell = previousBoard[i][j];
-                if (cell.getValue() != 0) {
-                    // Calculate current position based on animation progress
-                    float progress = (float)currentAnimationFrame / ANIMATION_FRAMES;
-                    
-                    // Apply easing function for smoother animation
-                    progress = easeCubic(progress);
-                    
-                    // Only animate in the specific direction of movement
-                    float currentX, currentY;
-                    
-                    if (cell.getSourceY() == cell.getTargetY()) {
-                        currentX = cell.getSourceX() + (cell.getTargetX() - cell.getSourceX()) * progress;
-                        currentY = cell.getSourceY();
-                    } 
-                    else if (cell.getSourceX() == cell.getTargetX()) {
-                        currentX = cell.getSourceX();
-                        currentY = cell.getSourceY() + (cell.getTargetY() - cell.getSourceY()) * progress;
-                    }
-                    else {
-                        currentX = cell.getTargetX();
-                        currentY = cell.getTargetY();
-                    }
-                    
-                    // Draw tile at interpolated position
-                    cell.drawAnimated(this, currentX, currentY);
-                }
+        // Draw animated tiles
+        for (AnimatedTile tile : animatedTiles) {
+            // Calculate current position based on animation progress
+            float progress = (float)currentAnimationFrame / ANIMATION_FRAMES;
+            
+            // Interpolate between source and target positions
+            float currentX = tile.getSourceX() + (tile.getTargetX() - tile.getSourceX()) * progress;
+            float currentY = tile.getSourceY() + (tile.getTargetY() - tile.getSourceY()) * progress;
+            
+            // Calculate position in pixels
+            float px = currentX * (CELLSIZE + CELL_BUFFER) + CELL_BUFFER;
+            float py = currentY * (CELLSIZE + CELL_BUFFER) + CELL_BUFFER + offsetY;
+            
+            // Draw tile at interpolated position
+            noStroke();
+            fill(189, 172, 151);  // Default cell color
+            rect(px, py, CELLSIZE, CELLSIZE, 20);
+            
+            // Draw tile value
+            if (tile.getValue() > 0) {
+                tile.draw(this, px, py);
+                
             }
         }
     }
 
-    // Update the draw method to use the correct colors
     @Override
     public void draw() {
         // Draw background with the correct 2048 color
-        background(BACKGROUND_COLOR);  // Standard 2048 background color
+        background(BACKGROUND_COLOR);
 
-        // Draw the grid and tiles
         this.textSize(40);
         this.strokeWeight(15);
 
@@ -505,10 +481,11 @@ public class App extends PApplet {
             if (currentAnimationFrame >= ANIMATION_FRAMES) {
                 isAnimating = false;
 
-                // Add a new tile if the board changed
+                // Add a new tile if the board changed and we're waiting for one
                 if (waitingForNewTile) {
                     addRandomTile();
                     waitingForNewTile = false;
+                    checkGameOver();
                 }
             }
         } else {
@@ -519,11 +496,13 @@ public class App extends PApplet {
                     // Draw empty cell background
                     fill(GRID_COLOR);
                     stroke(GRID_BORDER_COLOR);
-                    rect(j * CELLSIZE, i * CELLSIZE, CELLSIZE, CELLSIZE);
+                    rect(j * (CELLSIZE + CELL_BUFFER) + CELL_BUFFER, 
+                         i * (CELLSIZE + CELL_BUFFER) + CELL_BUFFER + offsetY, 
+                         CELLSIZE, CELLSIZE, 20);
                 }
             }
             
-            // Then draw the tiles (whether animated or static)
+            // Then draw the tiles
             for (int i = 0; i < board.length; i++) {
                 for (int j = 0; j < board[i].length; j++) {
                     board[i][j].draw(this);
@@ -536,15 +515,15 @@ public class App extends PApplet {
             long elapsedTime = (millis() - startTime) / 1000;  // Time in seconds
 
             // White rectangle for the timer background
-            fill(255); 
+            fill(155, 138, 122); 
             noStroke();
-            rect(WIDTH - 105, 5, 100, 40);  // Position the rectangle
+            rect(0, 0, WIDTH, offsetY);  // Position the rectangle
 
             // Timer text in smaller font, centered inside the rectangle
             textSize(20);
-            fill(0);  // Black text
+            fill(0);
             textAlign(CENTER, CENTER);
-            text("Time: " + elapsedTime + "s", WIDTH - 55, 20);  // Adjusted position
+            text("TIME: " + elapsedTime + "s", WIDTH - 100, 20);  // Adjusted position
         }
 
         // Display "GAME OVER" if the game is over
@@ -554,6 +533,8 @@ public class App extends PApplet {
             textAlign(CENTER, CENTER);
             fill(0);
             text("GAME OVER", WIDTH / 2, HEIGHT / 2);
+            textSize(20);
+            text("Press 'R' to restart", WIDTH / 2, HEIGHT / 2 + 40);
         }
     }
 
@@ -574,27 +555,36 @@ public class App extends PApplet {
     }
 
     private void checkGameOver() {
-        gameOver = true;
+        // Check if there are any empty cells
         for (int y = 0; y < GRID_SIZE; y++) {
             for (int x = 0; x < GRID_SIZE; x++) {
                 if (board[y][x].getValue() == 0) {
+                    // There's at least one empty cell, so the game is not over
                     gameOver = false;
-                    break;
-                }
-                if (x < GRID_SIZE - 1 && board[y][x].getValue() == board[y][x + 1].getValue()) {
-                    gameOver = false;
-                    break;
-                }
-                if (y < GRID_SIZE - 1 && board[y][x].getValue() == board[y + 1][x].getValue()) {
-                    gameOver = false;
-                    break;
+                    return;
                 }
             }
         }
-
-        if (gameOver) {
-            System.out.println("Game Over!");
+        
+        // No empty cells, check if there are any possible merges
+        for (int y = 0; y < GRID_SIZE; y++) {
+            for (int x = 0; x < GRID_SIZE; x++) {
+                // Check right
+                if (x < GRID_SIZE - 1 && board[y][x].getValue() == board[y][x+1].getValue()) {
+                    gameOver = false;
+                    return;
+                }
+                // Check down
+                if (y < GRID_SIZE - 1 && board[y][x].getValue() == board[y+1][x].getValue()) {
+                    gameOver = false;
+                    return;
+                }
+            }
         }
+        
+        // If we get here, the game is over
+        gameOver = true;
+        System.out.println("Game Over!");
     }
 
     private void restartGame() {
@@ -602,19 +592,22 @@ public class App extends PApplet {
         gameOver = false;
         startTime = millis();  // Reset the timer
         isAnimating = false;
-        this.board = new Cell[GRID_SIZE][GRID_SIZE];
-        this.previousBoard = new Cell[GRID_SIZE][GRID_SIZE];
-
+        
+        // Reset the board
         for (int i = 0; i < board.length; i++) {
-            for (int i2 = 0; i2 < board[i].length; i2++) {
-                board[i][i2] = new Cell(i2, i);
-                previousBoard[i][i2] = new Cell(i2, i);
+            for (int j = 0; j < board[i].length; j++) {
+                board[i][j] = new Cell(j, i);
             }
         }
+        
+        // Clear animation tiles
+        animatedTiles.clear();
 
+        // Add initial tiles
         addRandomTile();
-        saveCurrentBoardState();
+        addRandomTile();
     }
+
 
     public static void main(String[] args) {
         if (args.length > 0) {
@@ -628,8 +621,8 @@ public class App extends PApplet {
              }
         }
 
-        WIDTH = GRID_SIZE * CELLSIZE;
-        HEIGHT = GRID_SIZE * CELLSIZE;
+        WIDTH = GRID_SIZE * CELLSIZE + ((GRID_SIZE + 1) * CELL_BUFFER);
+        HEIGHT = GRID_SIZE * CELLSIZE + ((GRID_SIZE + 1) * CELL_BUFFER) + offsetY;
 
         PApplet.main("TwentyFortyEight.App");
     }
